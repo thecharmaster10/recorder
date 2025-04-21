@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSCE Audio Recorder</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .recorder-container {
+            max-width: 100%;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 15px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .timer {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.2s;
+        }
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .button-primary {
+            background-color: #3498db;
+            color: white;
+        }
+        .button-primary:hover:not(:disabled) {
+            background-color: #2980b9;
+        }
+        .button-danger {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .button-danger:hover:not(:disabled) {
+            background-color: #c0392b;
+        }
+        .button-outline {
+            background-color: transparent;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+        .button-outline:hover:not(:disabled) {
+            background-color: #f5f5f5;
+        }
+        .audio-player {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #f5f7fa;
+            border-radius: 8px;
+            display: none;
+        }
+        .recording-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .status-message {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: none;
+        }
+        .status-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .status-error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="recorder-container">
+        <div class="controls">
+            <div class="timer" id="recording-timer">00:00</div>
+            <div class="action-buttons">
+                <button class="button button-primary" id="start-recording">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+                    Start Recording
+                </button>
+                <button class="button button-danger" id="stop-recording" style="display: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    Stop
+                </button>
+                <button class="button button-outline" id="play-button" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Play
+                </button>
+                <button class="button button-outline" id="save-button" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Save
+                </button>
+            </div>
+        </div>
+        
+        <div class="audio-player" id="audio-player">
+            <audio id="audio-element" controls style="width: 100%;"></audio>
+            <div class="recording-info">
+                <span class="recording-length" id="recording-length">Duration: 0:00</span>
+                <span class="recording-size" id="recording-size">Size: 0 KB</span>
+            </div>
+        </div>
+        
+        <div class="status-message" id="status-feedback"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get station ID from URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const stationId = urlParams.get('station') || 'default';
+            
+            // Elements
+            const startRecordingBtn = document.getElementById('start-recording');
+            const stopRecordingBtn = document.getElementById('stop-recording');
+            const playButton = document.getElementById('play-button');
+            const saveButton = document.getElementById('save-button');
+            const timerDisplay = document.getElementById('recording-timer');
+            const statusFeedback = document.getElementById('status-feedback');
+            const audioPlayer = document.getElementById('audio-player');
+            const audioElement = document.getElementById('audio-element');
+            const recordingLengthDisplay = document.getElementById('recording-length');
+            const recordingSizeDisplay = document.getElementById('recording-size');
+            
+            // State variables
+            let mediaRecorder = null;
+            let audioStream = null;
+            let audioChunks = [];
+            let audioBlob = null;
+            let audioUrl = null;
+            let timerInterval = null;
+            let seconds = 0;
+            let isPlaying = false;
+            let recordingDuration = 0;
+            
+            // Check browser support for recording
+            function checkBrowserSupport() {
+                if (!navigator.mediaDevices || !window.MediaRecorder) {
+                    showStatus('Your browser does not support audio recording. Please use Chrome, Firefox, or another modern browser.', true);
+                    return false;
+                }
+                return true;
+            }
+            
+            // Start recording
+            function startRecording() {
+                // Reset recording state
+                resetRecording();
+                
+                // Request microphone access
+                navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                })
+                .then(stream => {
+                    audioStream = stream;
+                    
+                    // Create media recorder
+                    try {
+                        // Try high quality settings
+                        mediaRecorder = new MediaRecorder(stream, { 
+                            mimeType: 'audio/webm;codecs=opus',
+                            audioBitsPerSecond: 128000
+                        });
+                    } catch (e) {
+                        try {
+                            // Fallback to standard webm
+                            mediaRecorder = new MediaRecorder(stream);
+                        } catch (e) {
+                            showStatus('Recording is not supported in your browser', true);
+                            return;
+                        }
+                    }
+                    
+                    // Set up event handlers
+                    mediaRecorder.ondataavailable = e => {
+                        if (e.data.size > 0) {
+                            audioChunks.push(e.data);
+                        }
+                    };
+                    
+                    mediaRecorder.onstop = () => {
+                        // Save the recording duration
+                        recordingDuration = seconds;
+                        
+                        // Create the audio blob
+                        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+                        audioBlob = new Blob(audioChunks, { type: mimeType });
+                        
+                        // Create URL for audio blob
+                        if (audioUrl) {
+                            URL.revokeObjectURL(audioUrl);
+                        }
+                        audioUrl = URL.createObjectURL(audioBlob);
+                        
+                        // Set up audio element
+                        audioElement.src = audioUrl;
+                        
+                        // Show audio player
+                        audioPlayer.style.display = 'block';
+                        
+                        // Update recording info
+                        recordingLengthDisplay.textContent = `Duration: ${formatTime(recordingDuration)}`;
+                        const sizeKB = Math.round(audioBlob.size / 1024);
+                        recordingSizeDisplay.textContent = sizeKB < 1024 ? 
+                            `Size: ${sizeKB} KB` : 
+                            `Size: ${(sizeKB / 1024).toFixed(1)} MB`;
+                        
+                        // Enable playback controls
+                        playButton.disabled = false;
+                        saveButton.disabled = false;
+                        
+                        showStatus('Recording completed', false);
+                    };
+                    
+                    // Start recording
+                    mediaRecorder.start(100);
+                    
+                    // Start timer
+                    seconds = 0;
+                    updateTimerDisplay();
+                    timerInterval = setInterval(() => {
+                        seconds++;
+                        updateTimerDisplay();
+                    }, 1000);
+                    
+                    // Update UI
+                    startRecordingBtn.style.display = 'none';
+                    stopRecordingBtn.style.display = 'flex';
+                    playButton.disabled = true;
+                    saveButton.disabled = true;
+                    audioPlayer.style.display = 'none';
+                    
+                    showStatus('Recording started...', false);
+                })
+                .catch(err => {
+                    console.error('Error accessing microphone:', err);
+                    showStatus('Unable to access microphone. Please check permissions.', true);
+                });
+            }
+            
+            // Stop recording
+            function stopRecording() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    
+                    // Stop microphone
+                    if (audioStream) {
+                        audioStream.getTracks().forEach(track => track.stop());
+                    }
+                    
+                    // Stop timer
+                    clearInterval(timerInterval);
+                    
+                    // Update UI
+                    stopRecordingBtn.style.display = 'none';
+                    startRecordingBtn.style.display = 'flex';
+                }
+            }
+            
+            // Toggle audio playback
+            function togglePlayback() {
+                if (!audioElement.src) return;
+                
+                try {
+                    if (audioElement.paused) {
+                        audioElement.play()
+                            .then(() => {
+                                playButton.innerHTML = `
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                                    Pause
+                                `;
+                                isPlaying = true;
+                            })
+                            .catch(err => {
+                                console.error('Play error:', err);
+                                showStatus('Error playing audio', true);
+                            });
+                    } else {
+                        audioElement.pause();
+                        playButton.innerHTML = `
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Play
+                        `;
+                        isPlaying = false;
+                    }
+                } catch (err) {
+                    console.error('Playback error:', err);
+                    showStatus('Error with playback', true);
+                }
+            }
+            
+            // Format time as mm:ss
+            function formatTime(seconds) {
+                if (isNaN(seconds)) return '0:00';
+                
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = Math.floor(seconds % 60);
+                return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+            }
+            
+            // Update timer display
+            function updateTimerDisplay() {
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+            }
+            
+            // Reset recording state
+            function resetRecording() {
+                audioChunks = [];
+                
+                if (audioUrl) {
+                    URL.revokeObjectURL(audioUrl);
+                }
+                
+                audioBlob = null;
+                audioUrl = null;
+                audioElement.src = '';
+                audioPlayer.style.display = 'none';
+                
+                // Reset buttons
+                playButton.disabled = true;
+                saveButton.disabled = true;
+                
+                // Reset timer
+                seconds = 0;
+                recordingDuration = 0;
+                updateTimerDisplay();
+                
+                clearInterval(timerInterval);
+            }
+            
+            // Save recording
+            function saveRecording() {
+                if (!audioBlob) {
+                    showStatus('No recording to save', true);
+                    return;
+                }
+                
+                try {
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const fileExt = (mediaRecorder && mediaRecorder.mimeType && mediaRecorder.mimeType.includes('webm')) ?
+                        'webm' : 'wav';
+                    
+                    const fileName = `osce-${stationId}-${timestamp}.${fileExt}`;
+                    
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = audioUrl;
+                    downloadLink.download = fileName;
+                    document.body.appendChild(downloadLink);
+                    downloadLink.click();
+                    document.body.removeChild(downloadLink);
+                    
+                    showStatus(`Saved as ${fileName}`, false);
+                } catch (err) {
+                    console.error('Save error:', err);
+                    showStatus('Error saving recording', true);
+                }
+            }
+            
+            // Show status message
+            function showStatus(message, isError) {
+                statusFeedback.textContent = message;
+                statusFeedback.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+                statusFeedback.style.display = 'block';
+                
+                // Auto-hide after 3 seconds
+                setTimeout(() => {
+                    statusFeedback.style.display = 'none';
+                }, 3000);
+            }
+            
+            // Reset play button when audio ends
+            function resetPlayButton() {
+                playButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Play
+                `;
+                isPlaying = false;
+            }
+            
+            // Add event listeners
+            startRecordingBtn.addEventListener('click', startRecording);
+            stopRecordingBtn.addEventListener('click', stopRecording);
+            playButton.addEventListener('click', togglePlayback);
+            saveButton.addEventListener('click', saveRecording);
+            audioElement.addEventListener('ended', resetPlayButton);
+            
+            // Initialize
+            checkBrowserSupport();
+        });
+    </script>
+</body>
+</html>
