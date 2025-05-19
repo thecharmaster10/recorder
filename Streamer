@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stream</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+            cursor: none; /* Hide cursor by default */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        /* Main container with fixed aspect ratio */
+        #player-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        
+        /* Video container with fixed 1920x1080 aspect ratio */
+        #video-container {
+            width: 1920px;
+            height: 1080px;
+            max-width: 100%;
+            max-height: 100%;
+            position: relative;
+            background-color: #000;
+            aspect-ratio: 16 / 9;
+        }
+        
+        /* Scale the container down while maintaining aspect ratio */
+        @media (max-width: 1920px), (max-height: 1080px) {
+            #video-container {
+                width: auto;
+                height: auto;
+                max-width: 100%;
+                max-height: 100%;
+            }
+        }
+        
+        #livestream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            pointer-events: none; /* Prevents clicks on the video itself */
+            background-color: #000;
+        }
+        
+        /* Hide all native controls */
+        video::-webkit-media-controls {
+            display: none !important;
+        }
+        
+        /* Custom controls container - now on the left side and hidden by default */
+        #controls-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 30px;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+            pointer-events: auto;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            opacity: 0; /* Hidden by default */
+            transform: translateY(10px);
+        }
+        
+        /* Show controls when container has active class */
+        #controls-container.active {
+            opacity: 0.9;
+            transform: translateY(0);
+        }
+        
+        /* Show cursor when controls are visible */
+        body.controls-visible {
+            cursor: auto;
+        }
+        
+        /* Logo container in the bottom right - now larger */
+        #logo-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            max-width: 200px; /* Increased from 150px to 200px */
+            max-height: 120px; /* Increased proportionally */
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+        
+        #logo-container:hover {
+            opacity: 1;
+        }
+        
+        #logo {
+            width: 100%;
+            height: auto;
+        }
+        
+        /* Volume icon */
+        #volume-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 10px;
+            cursor: pointer;
+            color: white;
+        }
+        
+        /* SVG icons for volume */
+        .volume-high-icon, .volume-mute-icon {
+            fill: white;
+            width: 20px;
+            height: 20px;
+        }
+        
+        /* Custom volume slider styling */
+        #volume-control {
+            -webkit-appearance: none;
+            width: 80px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        #volume-control::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        #volume-control::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            border: none;
+            transition: background 0.2s;
+        }
+        
+        #volume-control::-webkit-slider-thumb:hover {
+            background: #f0f0f0;
+        }
+        
+        #volume-control::-moz-range-thumb:hover {
+            background: #f0f0f0;
+        }
+        
+        /* Volume level indicator */
+        #volume-level {
+            color: white;
+            font-size: 12px;
+            min-width: 30px;
+            text-align: center;
+            margin-left: 10px;
+        }
+        
+        /* Initial muted message */
+        #unmute-message {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        
+        .show-message {
+            opacity: 1 !important;
+        }
+        
+        /* Fullscreen adjustments */
+        :fullscreen #video-container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="player-wrapper">
+        <div id="video-container">
+            <video id="livestream" autoplay playsinline disablePictureInPicture></video>
+            
+            <div id="unmute-message">
+                Click anywhere to unmute
+            </div>
+            
+            <div id="controls-container">
+                <div id="volume-icon" onclick="toggleMute()">
+                    <svg class="volume-high-icon" viewBox="0 0 24 24">
+                        <path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z" />
+                    </svg>
+                    <svg class="volume-mute-icon" viewBox="0 0 24 24" style="display:none;">
+                        <path d="M12,4L9.91,6.09L12,8.18V4M4.27,3L3,4.27L7.73,9H3V15H7L12,20V13.27L16.25,17.53C15.58,18.04 14.83,18.46 14,18.7V20.77C15.38,20.45 16.63,19.82 17.68,18.96L19.73,21L21,19.73L12,10.73L4.27,3M19,12C19,12.94 18.8,13.82 18.46,14.64L19.97,16.15C20.62,14.91 21,13.5 21,12C21,7.72 18,4.14 14,3.23V5.29C16.89,6.15 19,8.83 19,12M16.5,12C16.5,10.23 15.5,8.71 14,7.97V10.18L16.45,12.63C16.5,12.43 16.5,12.21 16.5,12Z" />
+                    </svg>
+                </div>
+                <input type="range" id="volume-control" min="0" max="1" step="0.05" value="1">
+                <span id="volume-level">100%</span>
+            </div>
+            
+            <!-- Logo in the bottom right corner -->
+            <div id="logo-container">
+                <img id="logo" src="https://medaptlytemplates.doo.ee/Medaptly_Logo-removebg-preview.png" alt="Medaptly Logo">
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        // Configuration
+        const SERVER_URL = 'http://localhost:8000'; // Change to your server address if needed
+        const STREAM_NAME = 'stream';
+        const HLS_URL = `${SERVER_URL}/live/${STREAM_NAME}/index.m3u8`;
+        
+        // DOM Elements
+        const video = document.getElementById('livestream');
+        const volumeControl = document.getElementById('volume-control');
+        const volumeLevel = document.getElementById('volume-level');
+        const volumeHighIcon = document.querySelector('.volume-high-icon');
+        const volumeMuteIcon = document.querySelector('.volume-mute-icon');
+        const unmuteMessage = document.getElementById('unmute-message');
+        const controlsContainer = document.getElementById('controls-container');
+        const body = document.body;
+        
+        // Variables to track state
+        let userInteracted = false;
+        let browserBlockedAutoplay = false;
+        let controlsTimeout = null;
+        let isControlsVisible = false;
+        let isUserInteractingWithControls = false;
+        
+        // Control visibility functions
+        function showControls() {
+            if (!isControlsVisible) {
+                controlsContainer.classList.add('active');
+                body.classList.add('controls-visible');
+                isControlsVisible = true;
+            }
+            
+            // Clear any existing timeout
+            if (controlsTimeout) {
+                clearTimeout(controlsTimeout);
+            }
+            
+            // Set a new timeout to hide controls after inactivity
+            if (!isUserInteractingWithControls) {
+                controlsTimeout = setTimeout(hideControls, 3000); // Hide after 3 seconds of inactivity
+            }
+        }
+        
+        function hideControls() {
+            if (!isUserInteractingWithControls) {
+                controlsContainer.classList.remove('active');
+                body.classList.remove('controls-visible');
+                isControlsVisible = false;
+            }
+        }
+        
+        // Mouse movement detection
+        document.addEventListener('mousemove', function() {
+            showControls();
+        });
+        
+        // Track when user is interacting with controls
+        controlsContainer.addEventListener('mouseenter', function() {
+            isUserInteractingWithControls = true;
+            clearTimeout(controlsTimeout);
+        });
+        
+        controlsContainer.addEventListener('mouseleave', function() {
+            isUserInteractingWithControls = false;
+            controlsTimeout = setTimeout(hideControls, 3000);
+        });
+        
+        // Disable right-click menu
+        document.addEventListener('contextmenu', event => event.preventDefault());
+        
+        // Volume control functionality
+        volumeControl.addEventListener('input', function() {
+            updateVolume(this.value);
+        });
+        
+        // Function to update volume and UI
+        function updateVolume(value) {
+            video.volume = value;
+            video.muted = (value === 0);
+            volumeLevel.textContent = Math.round(value * 100) + '%';
+            
+            // Update icon
+            if (value === 0 || video.muted) {
+                volumeHighIcon.style.display = 'none';
+                volumeMuteIcon.style.display = 'block';
+            } else {
+                volumeHighIcon.style.display = 'block';
+                volumeMuteIcon.style.display = 'none';
+            }
+        }
+        
+        // Toggle mute function
+        function toggleMute() {
+            if (video.muted || video.volume === 0) {
+                video.muted = false;
+                video.volume = 1;
+                volumeControl.value = 1;
+                updateVolume(1);
+            } else {
+                video.muted = true;
+                updateVolume(0);
+                volumeControl.value = 0;
+            }
+            userInteracted = true;
+            hideUnmuteMessage();
+        }
+        
+        // Listen for user interaction
+        document.addEventListener('click', function() {
+            if (!userInteracted && browserBlockedAutoplay) {
+                // Try to unmute on first user interaction
+                video.muted = false;
+                updateVolume(1);
+                userInteracted = true;
+                hideUnmuteMessage();
+            }
+        });
+        
+        // Hide unmute message
+        function hideUnmuteMessage() {
+            unmuteMessage.classList.remove('show-message');
+        }
+        
+        // Function to maintain aspect ratio
+        function maintainAspectRatio() {
+            const container = document.getElementById('video-container');
+            const wrapper = document.getElementById('player-wrapper');
+            
+            const wrapperWidth = wrapper.clientWidth;
+            const wrapperHeight = wrapper.clientHeight;
+            
+            const aspectRatio = 16 / 9; // 1920:1080 = 16:9
+            
+            let width, height;
+            
+            // Calculate the largest size that fits in the wrapper while maintaining aspect ratio
+            if (wrapperWidth / wrapperHeight > aspectRatio) {
+                // If wrapper is wider than video aspect ratio
+                height = wrapperHeight;
+                width = height * aspectRatio;
+            } else {
+                // If wrapper is taller than video aspect ratio
+                width = wrapperWidth;
+                height = width / aspectRatio;
+            }
+            
+            // Apply the calculated dimensions
+            if (!document.fullscreenElement) {
+                container.style.width = `${width}px`;
+                container.style.height = `${height}px`;
+            }
+        }
+        
+        // Initialize the player
+        function initPlayer() {
+            if (Hls.isSupported()) {
+                const hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 0 // Don't store previous segments for seeking
+                });
+                
+                hls.loadSource(HLS_URL);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    // Try to autoplay with sound
+                    video.muted = false; // Try to start unmuted
+                    const playPromise = video.play();
+                    
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            // Autoplay with sound succeeded
+                            updateVolume(1);
+                            userInteracted = true;
+                        }).catch(e => {
+                            // Autoplay with sound was prevented by browser
+                            console.log('Autoplay with sound prevented by browser. User interaction required.');
+                            browserBlockedAutoplay = true;
+                            video.muted = true;
+                            updateVolume(0);
+                            // Show unmute message
+                            unmuteMessage.classList.add('show-message');
+                            // Try again with muted (which browsers typically allow)
+                            video.play();
+                            
+                            // Auto-hide message after 5 seconds
+                            setTimeout(hideUnmuteMessage, 5000);
+                        });
+                    }
+                });
+                
+                // Always force play even if user tries to pause
+                video.addEventListener('pause', function() {
+                    video.play();
+                });
+                
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal) {
+                        setTimeout(() => {
+                            hls.destroy();
+                            initPlayer();
+                        }, 2000);
+                    }
+                });
+            } 
+            // For browsers with native HLS support like Safari
+            else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = HLS_URL;
+                
+                video.addEventListener('loadedmetadata', function() {
+                    // Try to autoplay with sound
+                    video.muted = false;
+                    const playPromise = video.play();
+                    
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            // Autoplay with sound succeeded
+                            updateVolume(1);
+                            userInteracted = true;
+                        }).catch(e => {
+                            // Autoplay with sound was prevented
+                            console.log('Autoplay with sound prevented by browser. User interaction required.');
+                            browserBlockedAutoplay = true;
+                            video.muted = true;
+                            updateVolume(0);
+                            // Show unmute message
+                            unmuteMessage.classList.add('show-message');
+                            // Try again with muted
+                            video.play();
+                            
+                            // Auto-hide message after 5 seconds
+                            setTimeout(hideUnmuteMessage, 5000);
+                        });
+                    }
+                });
+                
+                // Always force play even if user tries to pause
+                video.addEventListener('pause', function() {
+                    video.play();
+                });
+                
+                video.addEventListener('error', function() {
+                    setTimeout(() => {
+                        video.src = HLS_URL;
+                    }, 2000);
+                });
+            }
+        }
+        
+        // Check stream status and reconnect if needed
+        function checkStream() {
+            fetch(HLS_URL, { method: 'HEAD', cache: 'no-store' })
+                .then(response => {
+                    if (!response.ok) {
+                        // If stream is down, try to reconnect
+                        setTimeout(initPlayer, 3000);
+                    } else if (video.paused) {
+                        // If somehow paused, force play
+                        video.play();
+                    }
+                })
+                .catch(() => {
+                    // If connection error, try to reconnect
+                    setTimeout(initPlayer, 3000);
+                });
+        }
+        
+        // Initialize player
+        initPlayer();
+        
+        // Apply aspect ratio calculation on page load
+        window.addEventListener('load', maintainAspectRatio);
+        
+        // Update aspect ratio when window is resized
+        window.addEventListener('resize', maintainAspectRatio);
+        
+        // Update aspect ratio when entering/exiting fullscreen
+        document.addEventListener('fullscreenchange', function() {
+            if (document.fullscreenElement) {
+                // In fullscreen mode, let the video take full screen
+                document.getElementById('video-container').style.width = '100%';
+                document.getElementById('video-container').style.height = '100%';
+            } else {
+                // Back from fullscreen, recalculate aspect ratio
+                maintainAspectRatio();
+            }
+        });
+        
+        // Periodically check stream status and ensure playing
+        setInterval(checkStream, 5000);
+
+        // Handle fullscreen with double click
+        document.addEventListener('dblclick', function() {
+            if (!document.fullscreenElement) {
+                document.getElementById('video-container').requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        });
+        
+        // Set keyboard controls for volume only
+        document.addEventListener('keydown', function(e) {
+            // Show controls when any key is pressed
+            showControls();
+            
+            // Arrow up/down for volume
+            if (e.key === 'ArrowUp') {
+                const newValue = Math.min(1, parseFloat(volumeControl.value) + 0.1);
+                volumeControl.value = newValue;
+                updateVolume(newValue);
+                userInteracted = true;
+                hideUnmuteMessage();
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                const newValue = Math.max(0, parseFloat(volumeControl.value) - 0.1);
+                volumeControl.value = newValue;
+                updateVolume(newValue);
+                userInteracted = true;
+                hideUnmuteMessage();
+                e.preventDefault();
+            } else if (e.key === 'm') {
+                // M key to toggle mute
+                toggleMute();
+                e.preventDefault();
+            }
+            // Prevent space bar from pausing
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+            }
+        });
+        
+        // Handle error if logo doesn't load
+        document.getElementById('logo').onerror = function() {
+            console.log('Error loading logo');
+            // You can set a fallback logo here if needed
+        };
+        
+        // Handle touch events for mobile devices
+        document.addEventListener('touchstart', function() {
+            showControls();
+            
+            if (!userInteracted && browserBlockedAutoplay) {
+                video.muted = false;
+                updateVolume(1);
+                userInteracted = true;
+                hideUnmuteMessage();
+            }
+        });
+        
+        // Initialize aspect ratio calculation
+        maintainAspectRatio();
+    </script>
+</body>
+</html>
